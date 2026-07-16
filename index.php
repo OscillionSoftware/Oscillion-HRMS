@@ -458,7 +458,7 @@ switch (true) {
             if (($_POST['_action'] ?? '') === 'save_settings') {
                 settings_save(array_intersect_key($_POST, array_flip([
                     'company_name', 'company_tagline', 'company_address', 'company_phone',
-                    'company_email', 'company_gstin', 'invoice_prefix', 'default_terms', 'about_us',
+                    'company_email', 'company_gstin', 'invoice_prefix', 'default_terms',
                 ])));
                 $saved = true;
             } elseif (($_POST['_action'] ?? '') === 'change_password') {

@@ -39,10 +39,6 @@
       <label>Default Terms & Conditions</label>
       <textarea name="default_terms" rows="6"><?= e($settings['default_terms'] ?? '') ?></textarea>
     </div>
-    <div class="field full">
-      <label>About Us <span class="muted">(page 2 of every proposal PDF)</span></label>
-      <textarea name="about_us" rows="8"><?= e($settings['about_us'] ?? '') ?></textarea>
-    </div>
     <div class="full">
       <button class="btn btn-primary" type="submit">Save Settings</button>
     </div>

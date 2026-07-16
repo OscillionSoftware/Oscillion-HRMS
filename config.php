@@ -335,24 +335,6 @@ function init_schema(PDO $pdo): void
             $stmt->execute([$k, $v]);
         }
     }
-    // About Us text for proposals (added later; seed if missing)
-    $pdo->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('about_us',
-'Oscillion Software is a technology company focused on building mobile apps, web portals and business software that help companies grow.
-
-We believe in building beyond boundaries — clean design, reliable code and honest communication. From the first call to launch day and beyond, one dedicated team handles your project end to end.
-
-What we do:
-• Mobile app development (Android & iOS)
-• Websites & web portals
-• Custom business software (CRM, HRMS, billing)
-• Hosting, domains & ongoing maintenance
-
-Why clients choose us:
-• Transparent, fixed pricing — no surprises
-• On-time delivery with weekly progress updates
-• 30 days of free support after every launch
-• Long-term partnership for hosting and renewals')");
-
     // Seed super admin
     $exists = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'super_admin'")->fetchColumn();
     if (!$exists) {
