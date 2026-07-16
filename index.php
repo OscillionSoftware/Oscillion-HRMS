@@ -452,6 +452,8 @@ switch (true) {
 
     case $page === 'settings':
         $saved = false;
+        $pwdError = null;
+        $pwdSaved = false;
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (($_POST['_action'] ?? '') === 'save_settings') {
                 settings_save(array_intersect_key($_POST, array_flip([
@@ -459,6 +461,13 @@ switch (true) {
                     'company_email', 'company_gstin', 'invoice_prefix', 'default_terms', 'about_us',
                 ])));
                 $saved = true;
+            } elseif (($_POST['_action'] ?? '') === 'change_password') {
+                if (($_POST['new_password'] ?? '') !== ($_POST['confirm_password'] ?? '')) {
+                    $pwdError = 'New password and confirmation do not match.';
+                } else {
+                    $pwdError = change_password((int) $user['id'], $_POST['current_password'] ?? '', $_POST['new_password'] ?? '');
+                }
+                $pwdSaved = $pwdError === null;
             } elseif (($_POST['_action'] ?? '') === 'save_account') {
                 if (trim($_POST['name'] ?? '') !== '') {
                     save_account($_POST, !empty($_POST['account_id']) ? (int) $_POST['account_id'] : null);
@@ -477,7 +486,7 @@ switch (true) {
         }
         $settings = settings_all();
         $accounts = query_accounts();
-        render('settings', compact('user', 'settings', 'accounts', 'saved'));
+        render('settings', compact('user', 'settings', 'accounts', 'saved', 'pwdError', 'pwdSaved'));
         break;
 
     default:

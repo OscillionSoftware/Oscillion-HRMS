@@ -21,6 +21,22 @@ function attempt_login(string $email, string $password): ?array
     return null;
 }
 
+function change_password(int $userId, string $currentPassword, string $newPassword): ?string
+{
+    $stmt = db()->prepare('SELECT password_hash FROM users WHERE id = ?');
+    $stmt->execute([$userId]);
+    $hash = $stmt->fetchColumn();
+    if (!$hash || !password_verify($currentPassword, $hash)) {
+        return 'Current password is incorrect.';
+    }
+    if (strlen($newPassword) < 8) {
+        return 'New password must be at least 8 characters.';
+    }
+    db()->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+        ->execute([password_hash($newPassword, PASSWORD_DEFAULT), $userId]);
+    return null;
+}
+
 function issue_api_token(int $userId): string
 {
     // Reuse the existing token so logging in from one device doesn't

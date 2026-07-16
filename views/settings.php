@@ -50,6 +50,30 @@
 </div>
 
 <div class="card">
+  <h2 style="font-size:17px;margin-bottom:12px">Change Password</h2>
+  <?php if (!empty($pwdSaved)): ?><div class="errors" style="background:#e8f8ee;color:var(--success);border-color:#bfe6cd">Password changed.</div><?php endif; ?>
+  <?php if (!empty($pwdError)): ?><div class="errors"><?= e($pwdError) ?></div><?php endif; ?>
+  <form method="post" class="form-grid">
+    <input type="hidden" name="_action" value="change_password">
+    <div class="field">
+      <label>Current Password</label>
+      <input type="password" name="current_password" required autocomplete="current-password">
+    </div>
+    <div class="field">
+      <label>New Password</label>
+      <input type="password" name="new_password" required minlength="8" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label>Confirm New Password</label>
+      <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password">
+    </div>
+    <div class="full">
+      <button class="btn btn-primary" type="submit">Change Password</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
   <h2 style="font-size:17px;margin-bottom:12px">Payment Accounts <span class="muted" style="font-size:13px;font-weight:400">(where you receive money)</span></h2>
   <table>
     <tr><th>Name</th><th>Type</th><th>UPI ID / Details</th><th>Account No & IFSC <span class="muted">(bank only)</span></th><th>Active</th><th></th></tr>
