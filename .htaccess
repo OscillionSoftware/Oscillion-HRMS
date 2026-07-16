@@ -1,0 +1,7 @@
+# Route all requests that don't match a real file/directory to index.php,
+# which handles routing itself (mirrors the `php -S` built-in router used
+# in local dev — see the comment at the top of index.php).
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
