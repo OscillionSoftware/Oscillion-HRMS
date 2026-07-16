@@ -1,0 +1,4 @@
+# Deny all direct web access to this folder (Apache).
+# Protects hrms.sqlite (your entire database) and .appkey (the encryption
+# secret for the credentials vault) from ever being downloaded directly.
+Require all denied
