@@ -65,5 +65,6 @@ function nav_active(string $key, string $p): bool {
 <main class="container">
   <?= $content ?>
 </main>
+<?= csrf_boot_script() ?>
 </body>
 </html>

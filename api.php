@@ -34,7 +34,9 @@ function fail(string $message, int $code = 400): never
 // ---- Public: login ----
 if ($path === '/login' && $method === 'POST') {
     $user = attempt_login($input['email'] ?? '', $input['password'] ?? '');
-    if (!$user) fail('Invalid email or password.', 401);
+    if (!$user) {
+        fail(is_locked_out($input['email'] ?? '') ? 'Too many failed attempts. Try again in a few minutes.' : 'Invalid email or password.', 401);
+    }
     respond([
         'success' => true,
         'token'   => issue_api_token((int) $user['id']),
@@ -185,6 +187,7 @@ if ($path === '/accounts') {
 
 // DELETE /accounts/{id}
 if (preg_match('#^/accounts/(\d+)$#', $path, $m) && $method === 'DELETE') {
+    if (!is_admin($user)) fail('Admin only.', 403);
     $aid = (int) $m[1];
     db()->prepare('UPDATE invoice_payments SET account_id = NULL WHERE account_id = ?')->execute([$aid]);
     db()->prepare('UPDATE expenses SET account_id = NULL WHERE account_id = ?')->execute([$aid]);
@@ -244,6 +247,7 @@ if (preg_match('#^/invoices/(\d+)$#', $path, $m)) {
 
 // DELETE /invoices/{id} — removes invoice with its items and payments
 if (preg_match('#^/invoices/(\d+)$#', $path, $m) && $method === 'DELETE') {
+    if (!is_admin($user)) fail('Admin only.', 403);
     $invoice = get_invoice((int) $m[1]);
     if (!$invoice) fail('Invoice not found.', 404);
     db()->prepare('DELETE FROM invoices WHERE id = ?')->execute([(int) $invoice['id']]);
@@ -319,6 +323,7 @@ if (preg_match('#^/credentials/(\d+)$#', $path, $m)) {
         respond(['success' => true, 'credential' => get_credential((int) $cred['id'])]);
     }
     if ($method === 'DELETE') {
+        if (!is_admin($user)) fail('Admin only.', 403);
         db()->prepare('DELETE FROM project_credentials WHERE id = ?')->execute([(int) $cred['id']]);
         respond(['success' => true]);
     }
@@ -366,19 +371,27 @@ if (preg_match('#^/projects/(\d+)$#', $path, $m)) {
     }
 }
 
+// Salary is admin-only; strip it from responses and ignore attempts to set it otherwise.
+function mask_salary(array $employee, array $user): array
+{
+    if (!is_admin($user)) unset($employee['salary']);
+    return $employee;
+}
+
 // GET /employees (with filters) | POST /employees
 if ($path === '/employees') {
     if ($method === 'GET') {
-        respond(['success' => true, 'employees' => query_employees([
+        respond(['success' => true, 'employees' => array_map(fn($e) => mask_salary($e, $user), query_employees([
             'search' => $_GET['search'] ?? '',
             'status' => $_GET['status'] ?? '',
-        ])]);
+        ]))]);
     }
     if ($method === 'POST') {
+        if (!is_admin($user)) unset($input['salary']);
         $errors = validate_employee($input);
         if ($errors) fail(implode(' ', $errors), 422);
         $id = save_employee($input, null, $userId);
-        respond(['success' => true, 'employee' => get_employee($id)], 201);
+        respond(['success' => true, 'employee' => mask_salary(get_employee($id), $user)], 201);
     }
 }
 
@@ -387,14 +400,15 @@ if (preg_match('#^/employees/(\d+)$#', $path, $m)) {
     $employee = get_employee((int) $m[1]);
     if (!$employee) fail('Employee not found.', 404);
     if ($method === 'GET') {
-        respond(['success' => true, 'employee' => $employee]);
+        respond(['success' => true, 'employee' => mask_salary($employee, $user)]);
     }
     if ($method === 'PUT') {
+        if (!is_admin($user)) unset($input['salary']);
         $merged = array_merge($employee, $input);
         $errors = validate_employee($merged);
         if ($errors) fail(implode(' ', $errors), 422);
         save_employee($merged, (int) $employee['id'], $userId);
-        respond(['success' => true, 'employee' => get_employee((int) $employee['id'])]);
+        respond(['success' => true, 'employee' => mask_salary(get_employee((int) $employee['id']), $user)]);
     }
 }
 

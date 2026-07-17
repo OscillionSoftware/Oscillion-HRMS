@@ -18,7 +18,9 @@
     <div class="item"><div class="k">Designation</div><div class="v"><?= e($employee['designation'] ?: '—') ?></div></div>
     <div class="item"><div class="k">Department</div><div class="v"><?= e($employee['department'] ?: '—') ?></div></div>
     <div class="item"><div class="k">Joining Date</div><div class="v"><?= e($employee['joining_date'] ?: '—') ?></div></div>
+    <?php if (is_admin($user)): ?>
     <div class="item"><div class="k">Salary</div><div class="v"><?= $employee['salary'] !== null ? '₹' . number_format((float) $employee['salary'], 2) : '—' ?></div></div>
+    <?php endif; ?>
     <div class="item"><div class="k">Status</div><div class="v"><span class="badge emp-<?= e($employee['status']) ?>"><?= e(str_replace('_', ' ', $employee['status'])) ?></span></div></div>
     <div class="item"><div class="k">Added</div><div class="v"><?= e($employee['created_at']) ?></div></div>
   </div>

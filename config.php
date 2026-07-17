@@ -76,6 +76,10 @@ function init_schema(PDO $pdo): void
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'staff',
         api_token TEXT,
+        api_token_created_at TEXT,
+        must_change_password INTEGER NOT NULL DEFAULT 0,
+        failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+        locked_until TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )");
 
@@ -299,6 +303,21 @@ function init_schema(PDO $pdo): void
         rate REAL NOT NULL DEFAULT 0
     )");
 
+    // Migration: API token expiry + forced password change support
+    $userCols = array_column($pdo->query('PRAGMA table_info(users)')->fetchAll(), 'name');
+    if (!in_array('api_token_created_at', $userCols, true)) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN api_token_created_at TEXT');
+    }
+    if (!in_array('must_change_password', $userCols, true)) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!in_array('failed_login_attempts', $userCols, true)) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!in_array('locked_until', $userCols, true)) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN locked_until TEXT');
+    }
+
     // Migration: which payment accounts to show on each invoice (comma-separated ids)
     $cols = array_column($pdo->query('PRAGMA table_info(invoices)')->fetchAll(), 'name');
     if (!in_array('payment_account_ids', $cols, true)) {
@@ -335,10 +354,23 @@ function init_schema(PDO $pdo): void
             $stmt->execute([$k, $v]);
         }
     }
-    // Seed super admin
+    // Seed super admin with a random one-time password (not a fixed default),
+    // written next to the encryption key so only the server operator can read
+    // it; the account is forced to change it on first login.
     $exists = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'super_admin'")->fetchColumn();
     if (!$exists) {
-        $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'super_admin')");
-        $stmt->execute(['Oscillion Software', 'oscillionsoftware@gmail.com', password_hash('Demo@123', PASSWORD_DEFAULT)]);
+        $password = bin2hex(random_bytes(9));
+        $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role, must_change_password)
+                               VALUES (?, ?, ?, 'super_admin', 1)");
+        $stmt->execute(['Oscillion Software', 'oscillionsoftware@gmail.com', password_hash($password, PASSWORD_DEFAULT)]);
+
+        $path = __DIR__ . '/data/INITIAL_ADMIN_PASSWORD.txt';
+        file_put_contents($path,
+            "Initial super admin login for Oscillion HRMS\n" .
+            "Email:    oscillionsoftware@gmail.com\n" .
+            "Password: $password\n\n" .
+            "You will be required to change this password on first login.\n" .
+            "Delete this file once you've logged in.\n");
+        chmod($path, 0600);
     }
 }

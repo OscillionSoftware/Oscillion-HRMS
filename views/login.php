@@ -28,5 +28,6 @@
     <button class="btn btn-primary" type="submit">Sign In</button>
   </form>
 </div>
+<?= csrf_boot_script() ?>
 </body>
 </html>

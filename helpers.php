@@ -10,15 +10,43 @@ function e(?string $s): string
 
 // ---------- Auth ----------
 
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_MINUTES = 15;
+
 function attempt_login(string $email, string $password): ?array
 {
+    $email = trim($email);
     $stmt = db()->prepare('SELECT * FROM users WHERE lower(email) = lower(?)');
-    $stmt->execute([trim($email)]);
+    $stmt->execute([$email]);
     $user = $stmt->fetch();
+
+    if ($user && $user['locked_until'] && strtotime($user['locked_until']) > time()) {
+        return null; // locked out, don't even check the password
+    }
+
     if ($user && password_verify($password, $user['password_hash'])) {
+        db()->prepare('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?')
+            ->execute([$user['id']]);
         return $user;
     }
+
+    if ($user) {
+        $attempts = (int) $user['failed_login_attempts'] + 1;
+        $lockedUntil = $attempts >= LOGIN_MAX_ATTEMPTS
+            ? date('Y-m-d H:i:s', strtotime('+' . LOGIN_LOCKOUT_MINUTES . ' minutes'))
+            : null;
+        db()->prepare('UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?')
+            ->execute([$attempts, $lockedUntil, $user['id']]);
+    }
     return null;
+}
+
+function is_locked_out(string $email): bool
+{
+    $stmt = db()->prepare('SELECT locked_until FROM users WHERE lower(email) = lower(?)');
+    $stmt->execute([trim($email)]);
+    $lockedUntil = $stmt->fetchColumn();
+    return $lockedUntil && strtotime($lockedUntil) > time();
 }
 
 function change_password(int $userId, string $currentPassword, string $newPassword): ?string
@@ -32,23 +60,30 @@ function change_password(int $userId, string $currentPassword, string $newPasswo
     if (strlen($newPassword) < 8) {
         return 'New password must be at least 8 characters.';
     }
-    db()->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+    db()->prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?')
         ->execute([password_hash($newPassword, PASSWORD_DEFAULT), $userId]);
     return null;
 }
 
+const API_TOKEN_LIFETIME_DAYS = 180;
+
 function issue_api_token(int $userId): string
 {
-    // Reuse the existing token so logging in from one device doesn't
-    // invalidate sessions on other devices.
-    $stmt = db()->prepare('SELECT api_token FROM users WHERE id = ?');
+    // Reuse the existing token (if still valid) so logging in from one device
+    // doesn't invalidate sessions on other devices; expired/missing tokens
+    // are replaced with a fresh one.
+    $stmt = db()->prepare('SELECT api_token, api_token_created_at FROM users WHERE id = ?');
     $stmt->execute([$userId]);
-    $token = $stmt->fetchColumn();
-    if (!$token) {
+    $row = $stmt->fetch();
+    $expired = $row['api_token_created_at']
+        && strtotime($row['api_token_created_at']) < strtotime('-' . API_TOKEN_LIFETIME_DAYS . ' days');
+    if (!$row['api_token'] || $expired) {
         $token = bin2hex(random_bytes(32));
-        db()->prepare('UPDATE users SET api_token = ? WHERE id = ?')->execute([$token, $userId]);
+        db()->prepare("UPDATE users SET api_token = ?, api_token_created_at = datetime('now') WHERE id = ?")
+            ->execute([$token, $userId]);
+        return $token;
     }
-    return $token;
+    return $row['api_token'];
 }
 
 function user_by_token(?string $token): ?array
@@ -56,7 +91,13 @@ function user_by_token(?string $token): ?array
     if (!$token) return null;
     $stmt = db()->prepare('SELECT * FROM users WHERE api_token = ?');
     $stmt->execute([$token]);
-    return $stmt->fetch() ?: null;
+    $user = $stmt->fetch() ?: null;
+    if (!$user) return null;
+    if ($user['api_token_created_at']
+        && strtotime($user['api_token_created_at']) < strtotime('-' . API_TOKEN_LIFETIME_DAYS . ' days')) {
+        return null; // expired — client must log in again to get a fresh token
+    }
+    return $user;
 }
 
 function current_web_user(): ?array
@@ -65,6 +106,65 @@ function current_web_user(): ?array
     $stmt = db()->prepare('SELECT * FROM users WHERE id = ?');
     $stmt->execute([$_SESSION['user_id']]);
     return $stmt->fetch() ?: null;
+}
+
+// ---------- CSRF ----------
+
+function csrf_token(): string
+{
+    if (empty($_SESSION['csrf'])) {
+        $_SESSION['csrf'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf'];
+}
+
+// Injected once per page (see layout.php / login.php / *_public.php); auto-adds
+// the CSRF token as a hidden field to every <form> on the page, including ones
+// rendered inside tables via the form="id" attribute pattern, so individual
+// views don't each need to remember to add it by hand.
+function csrf_boot_script(): string
+{
+    $token = e(csrf_token());
+    return <<<HTML
+<meta name="csrf-token" content="$token">
+<script>
+(function () {
+  var token = document.querySelector('meta[name="csrf-token"]').content;
+  document.querySelectorAll('form').forEach(function (f) {
+    if (!f.querySelector('input[name="_csrf"]')) {
+      var i = document.createElement('input');
+      i.type = 'hidden'; i.name = '_csrf'; i.value = token;
+      f.appendChild(i);
+    }
+  });
+})();
+</script>
+HTML;
+}
+
+function csrf_check(): void
+{
+    $expected = $_SESSION['csrf'] ?? null;
+    $given = $_POST['_csrf'] ?? null;
+    if (!$expected || !$given || !hash_equals($expected, $given)) {
+        http_response_code(403);
+        exit('Your session expired or the form was submitted from an untrusted source. Please go back, refresh the page, and try again.');
+    }
+}
+
+// ---------- Authorization ----------
+
+function is_admin(array $user): bool
+{
+    return $user['role'] === 'super_admin';
+}
+
+function require_admin(array $user): void
+{
+    if (!is_admin($user)) {
+        http_response_code(403);
+        exit('You do not have permission to perform this action. Contact an administrator.');
+    }
 }
 
 // ---------- Leads ----------
@@ -562,6 +662,10 @@ function validate_credential(array $in): array
     if (trim($in['label'] ?? '') === '' && trim($in['url'] ?? '') === '' && trim($in['username'] ?? '') === '') {
         $errors[] = 'Give at least a label, URL, or username.';
     }
+    $url = trim($in['url'] ?? '');
+    if ($url !== '' && !preg_match('#^https?://#i', $url)) {
+        $errors[] = 'URL must start with http:// or https://.';
+    }
     return $errors;
 }
 
@@ -629,8 +733,25 @@ function next_invoice_no(): string
 {
     $prefix = settings_all()['invoice_prefix'] ?? 'INV';
     $year = date('Y');
-    $count = (int) db()->query("SELECT COUNT(*) FROM invoices WHERE invoice_no LIKE '$prefix-$year-%'")->fetchColumn();
+    $stmt = db()->prepare("SELECT COUNT(*) FROM invoices WHERE invoice_no LIKE :pat ESCAPE '\\'");
+    $stmt->execute([':pat' => like_escape("$prefix-$year-") . '%']);
+    $count = (int) $stmt->fetchColumn();
     return sprintf('%s-%s-%03d', $prefix, $year, $count + 1);
+}
+
+// Escapes % and _ (SQLite LIKE wildcards) so a value used as a LIKE prefix
+// can't widen the match; pair with "ESCAPE '\'" on the query.
+function like_escape(string $s): string
+{
+    return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $s);
+}
+
+// Settings are free text but a few are interpolated into filenames/queries
+// elsewhere, so keep them restricted to a safe character set.
+function sanitize_invoice_prefix(string $prefix): string
+{
+    $prefix = strtoupper(preg_replace('/[^A-Za-z0-9-]/', '', $prefix));
+    return $prefix !== '' ? substr($prefix, 0, 12) : 'INV';
 }
 
 function invoice_totals(array $inv, array $items, float $paid): array
@@ -906,7 +1027,9 @@ function next_quote_no(): string
 {
     $prefix = settings_all()['invoice_prefix'] ?? 'INV';
     $year = date('Y');
-    $count = (int) db()->query("SELECT COUNT(*) FROM quotations WHERE quote_no LIKE '$prefix-Q-$year-%'")->fetchColumn();
+    $stmt = db()->prepare("SELECT COUNT(*) FROM quotations WHERE quote_no LIKE :pat ESCAPE '\\'");
+    $stmt->execute([':pat' => like_escape("$prefix-Q-$year-") . '%']);
+    $count = (int) $stmt->fetchColumn();
     return sprintf('%s-Q-%s-%03d', $prefix, $year, $count + 1);
 }
 

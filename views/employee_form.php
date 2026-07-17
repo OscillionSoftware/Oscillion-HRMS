@@ -33,10 +33,12 @@
       <label>Joining Date</label>
       <input type="date" name="joining_date" value="<?= e($employee['joining_date'] ?? '') ?>">
     </div>
+    <?php if (is_admin($user)): ?>
     <div class="field">
       <label>Salary (₹/month)</label>
       <input type="number" step="0.01" min="0" name="salary" value="<?= e((string) ($employee['salary'] ?? '')) ?>">
     </div>
+    <?php endif; ?>
     <div class="field">
       <label>Status</label>
       <select name="status">

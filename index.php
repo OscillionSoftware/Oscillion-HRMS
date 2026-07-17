@@ -29,8 +29,15 @@ if (str_starts_with($uri, '/api')) {
     exit;
 }
 
+$https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
+session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'secure' => $https, 'httponly' => true, 'samesite' => 'Lax']);
 session_start();
 require_once __DIR__ . '/helpers.php';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+}
 
 $user = current_web_user();
 $page = trim($uri, '/') ?: 'dashboard';
@@ -84,11 +91,14 @@ if ($page === 'login') {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $u = attempt_login($_POST['email'] ?? '', $_POST['password'] ?? '');
         if ($u) {
+            session_regenerate_id(true); // avoid session fixation across the auth boundary
             $_SESSION['user_id'] = (int) $u['id'];
             header('Location: /');
             exit;
         }
-        $error = 'Invalid email or password.';
+        $error = is_locked_out($_POST['email'] ?? '')
+            ? 'Too many failed attempts. Try again in a few minutes.'
+            : 'Invalid email or password.';
     }
     require __DIR__ . '/views/login.php';
     exit;
@@ -96,6 +106,11 @@ if ($page === 'login') {
 
 if (!$user) {
     header('Location: /login');
+    exit;
+}
+
+if (!empty($user['must_change_password']) && $page !== 'settings' && $page !== 'logout') {
+    header('Location: /settings');
     exit;
 }
 
@@ -209,6 +224,7 @@ switch (true) {
                 $errors = validate_credential($_POST);
                 if (!$errors) save_credential($_POST, null, (int) $user['id'], (int) $project['id']);
             } elseif (($_POST['_action'] ?? '') === 'delete_credential') {
+                require_admin($user);
                 db()->prepare('DELETE FROM project_credentials WHERE id = ? AND project_id = ?')
                     ->execute([(int) $_POST['credential_id'], (int) $project['id']]);
             } elseif (($_POST['_action'] ?? '') === 'add_task') {
@@ -248,13 +264,15 @@ switch (true) {
         if (isset($m[1]) && !$employee) { http_response_code(404); exit('Employee not found'); }
         $errors = [];
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $errors = validate_employee($_POST);
+            $in = $_POST;
+            if (!is_admin($user)) $in['salary'] = $employee['salary'] ?? ''; // salary is admin-only, ignore tampering
+            $errors = validate_employee($in);
             if (!$errors) {
-                $id = save_employee($_POST, $employee ? (int) $employee['id'] : null, (int) $user['id']);
+                $id = save_employee($in, $employee ? (int) $employee['id'] : null, (int) $user['id']);
                 header("Location: /employees/$id");
                 exit;
             }
-            $employee = array_merge($employee ?? [], $_POST);
+            $employee = array_merge($employee ?? [], $in);
         }
         render('employee_form', compact('user', 'employee', 'errors'));
         break;
@@ -336,6 +354,7 @@ switch (true) {
             } elseif (($_POST['_action'] ?? '') === 'cancel') {
                 db()->prepare("UPDATE invoices SET status='cancelled' WHERE id=?")->execute([(int) $invoice['id']]);
             } elseif (($_POST['_action'] ?? '') === 'delete') {
+                require_admin($user);
                 db()->prepare('DELETE FROM invoices WHERE id = ?')->execute([(int) $invoice['id']]);
                 header('Location: /invoices');
                 exit;
@@ -456,10 +475,13 @@ switch (true) {
         $pwdSaved = false;
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (($_POST['_action'] ?? '') === 'save_settings') {
-                settings_save(array_intersect_key($_POST, array_flip([
+                require_admin($user);
+                $in = array_intersect_key($_POST, array_flip([
                     'company_name', 'company_tagline', 'company_address', 'company_phone',
                     'company_email', 'company_gstin', 'invoice_prefix', 'default_terms',
-                ])));
+                ]));
+                if (isset($in['invoice_prefix'])) $in['invoice_prefix'] = sanitize_invoice_prefix($in['invoice_prefix']);
+                settings_save($in);
                 $saved = true;
             } elseif (($_POST['_action'] ?? '') === 'change_password') {
                 if (($_POST['new_password'] ?? '') !== ($_POST['confirm_password'] ?? '')) {
@@ -468,18 +490,25 @@ switch (true) {
                     $pwdError = change_password((int) $user['id'], $_POST['current_password'] ?? '', $_POST['new_password'] ?? '');
                 }
                 $pwdSaved = $pwdError === null;
+                if ($pwdSaved) $user = current_web_user();
             } elseif (($_POST['_action'] ?? '') === 'save_account') {
+                require_admin($user);
                 if (trim($_POST['name'] ?? '') !== '') {
                     save_account($_POST, !empty($_POST['account_id']) ? (int) $_POST['account_id'] : null);
                 }
                 header('Location: /settings');
                 exit;
             } elseif (($_POST['_action'] ?? '') === 'delete_account') {
+                require_admin($user);
                 $aid = (int) $_POST['account_id'];
                 // Detach references so history keeps rows, then remove the account
                 db()->prepare('UPDATE invoice_payments SET account_id = NULL WHERE account_id = ?')->execute([$aid]);
                 db()->prepare('UPDATE expenses SET account_id = NULL WHERE account_id = ?')->execute([$aid]);
                 db()->prepare('DELETE FROM payment_accounts WHERE id = ?')->execute([$aid]);
+                header('Location: /settings');
+                exit;
+            } elseif (($_POST['_action'] ?? '') === 'revoke_api_token') {
+                db()->prepare('UPDATE users SET api_token = NULL, api_token_created_at = NULL WHERE id = ?')->execute([(int) $user['id']]);
                 header('Location: /settings');
                 exit;
             }

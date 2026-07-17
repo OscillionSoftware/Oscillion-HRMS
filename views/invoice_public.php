@@ -301,5 +301,6 @@
     </div>
   </div>
 <?php endif; ?>
+<?= csrf_boot_script() ?>
 </body>
 </html>

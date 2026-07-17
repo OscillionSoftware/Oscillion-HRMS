@@ -143,7 +143,7 @@
       <tr>
         <td><span class="badge"><?= e($c['type']) ?></span></td>
         <td><?= e($c['label'] ?: '—') ?></td>
-        <td><?php if ($c['url']): ?><a href="<?= e($c['url']) ?>" target="_blank" rel="noopener"><?= e($c['url']) ?></a><?php else: ?>—<?php endif; ?></td>
+        <td><?php if ($c['url'] && preg_match('#^https?://#i', $c['url'])): ?><a href="<?= e($c['url']) ?>" target="_blank" rel="noopener"><?= e($c['url']) ?></a><?php elseif ($c['url']): ?><?= e($c['url']) ?><?php else: ?>—<?php endif; ?></td>
         <td><?= e($c['username'] ?: '—') ?></td>
         <td>
           <?php if ($c['password'] !== ''): ?>

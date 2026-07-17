@@ -249,5 +249,6 @@
       </div>
     </div>
   </div>
+<?= csrf_boot_script() ?>
 </body>
 </html>

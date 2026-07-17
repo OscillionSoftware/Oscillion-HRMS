@@ -1,3 +1,4 @@
 # Live data — must never be overwritten by a deploy.
 data/hrms.sqlite
 data/.appkey
+data/INITIAL_ADMIN_PASSWORD.txt
